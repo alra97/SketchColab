@@ -1,0 +1,257 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SketchColab</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/5.0.4/signalr.min.js"></script>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        #lobby, #game {
+            width: 100%;
+            max-width: 1200px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin: 10px;
+        }
+
+            #lobby input, #lobby button, #game input, #game button {
+                margin: 5px;
+                padding: 10px;
+                border-radius: 4px;
+                border: 1px solid #ddd;
+            }
+
+            #lobby input {
+                width: calc(50% - 22px);
+            }
+
+            #lobby button {
+                background-color: #007bff;
+                color: #fff;
+                border: none;
+                cursor: pointer;
+            }
+
+                #lobby button:hover {
+                    background-color: #0056b3;
+                }
+
+        .container {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 20px;
+        }
+        
+        a {
+            color: #007bff;
+            text-decoration: none;
+        }
+
+        #drawingCanvas {
+            border: 1px solid #000;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        #tools {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+            #tools input[type="color"] {
+                margin-bottom: 10px;
+                border: none;
+                padding: 5px;
+                border-radius: 4px;
+            }
+
+            #tools button {
+                margin: 5px;
+                padding: 10px 15px;
+                border-radius: 4px;
+                border: none;
+                background-color: #28a745;
+                color: #fff;
+                cursor: pointer;
+            }
+
+                #tools button:hover {
+                    background-color: #218838;
+                }
+
+        #guessInput {
+            width: 100%;
+        }
+
+        #messages {
+            margin-top: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+            width: 100%;
+            background-color: #f8f9fa;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+            #messages div {
+                padding: 5px;
+                border-bottom: 1px solid #ddd;
+            }
+
+                #messages div:last-child {
+                    border-bottom: none;
+                }
+    </style>
+</head>
+<body>
+    <h1>Welcome to SketchColab</h1>
+
+    <div id="lobby">
+        Name:<input type="text" id="playerName" placeholder="Enter your name"><br />
+        Room:<input type="text" id="roomName" placeholder="Enter room name"><br />
+        <button id="createRoom">Create Room</button>
+        <button id="joinRoom">Join Room</button>
+    </div>
+
+    <div id="game">
+        <h2>Room: <span id="roomTitle"></span></h2>
+        <div class="container">
+            <canvas id="drawingCanvas" width="500" height="500"></canvas>
+            <div id="tools">
+                <input type="color" id="colorPicker" value="#000000">
+                <button id="clearCanvas">Clear Your Canvas</button>
+                <button id="eraser">Eraser</button>
+                <a href="help.html" id="tools button">Help</a>
+                <input type="text" id="guessInput" placeholder="Chat Now!">
+                <button id="sendGuess">Send</button>
+                <div id="messages"></div>
+
+            </div>
+        </div>
+        <!--
+            <h3>Players</h3>
+            <ul id="playerList"></ul>
+         -->
+    </div>
+
+    <script>
+        const canvas = document.getElementById('drawingCanvas');
+        const context = canvas.getContext('2d');
+        let isDrawing = false;
+        let isEraser = false;
+        let currentColor = '#000000';
+        let roomName = "";
+
+        const connection = new signalR.HubConnectionBuilder().withUrl("/drawingHub").build();
+
+        connection.start().catch(err => console.error(err.toString()));
+
+        document.getElementById('createRoom').onclick = function () {
+            const playerName = document.getElementById('playerName').value;
+            roomName = document.getElementById('roomName').value;
+            connection.invoke("CreateRoom", roomName, playerName);
+            switchToGameMode(roomName);
+        };
+
+        document.getElementById('joinRoom').onclick = function () {
+            const playerName = document.getElementById('playerName').value;
+            roomName = document.getElementById('roomName').value;
+            connection.invoke("JoinRoom", roomName, playerName);
+            switchToGameMode(roomName);
+        };
+
+        function switchToGameMode(roomName) {
+            document.getElementById('lobby').style.display = "none";
+            document.getElementById('game').style.display = "block";
+            document.getElementById('roomTitle').textContent = roomName;
+        }
+
+        canvas.addEventListener('mousedown', () => { isDrawing = true; });
+        canvas.addEventListener('mouseup', () => { isDrawing = false; context.beginPath(); });
+        canvas.addEventListener('mousemove', draw);
+
+        function draw(event) {
+            if (!isDrawing) return;
+            context.lineWidth = isEraser ? 20 : 5;
+            context.lineCap = 'round';
+            context.strokeStyle = isEraser ? '#FFFFFF' : currentColor;
+            context.lineTo(event.clientX - canvas.offsetLeft, event.clientY - canvas.offsetTop);
+            context.stroke();
+            context.beginPath();
+            context.moveTo(event.clientX - canvas.offsetLeft, event.clientY - canvas.offsetTop);
+
+            connection.invoke("SendDrawing", roomName, canvas.toDataURL());
+        }
+
+        connection.on("ReceiveDrawing", function (drawingData) {
+            let img = new Image();
+            img.src = drawingData;
+            img.onload = function () {
+                context.drawImage(img, 0, 0);
+            };
+        });
+
+        document.getElementById('colorPicker').addEventListener('input', function () {
+            currentColor = this.value;
+        });
+
+        document.getElementById('clearCanvas').onclick = function () {
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            connection.invoke("SendDrawing", roomName, canvas.toDataURL());
+        };
+
+        document.getElementById('eraser').onclick = function () {
+            isEraser = !isEraser;
+            this.textContent = isEraser ? 'Brush' : 'Eraser';
+        };
+
+        document.getElementById('sendGuess').onclick = function () {
+            const playerName = document.getElementById('playerName').value;
+            const guess = document.getElementById('guessInput').value;
+            connection.invoke("SendGuess", roomName, playerName, guess);
+            document.getElementById('guessInput').value = '';
+        };
+
+        connection.on("ReceiveGuess", function (user, guess) {
+            let msg = document.createElement('div');
+            msg.textContent = user + ": " + guess;
+            document.getElementById('messages').appendChild(msg);
+        });
+
+        connection.on("ReceiveMessage", function (message) {
+            let msg = document.createElement('div');
+            msg.textContent = message;
+            document.getElementById('messages').appendChild(msg);
+        });
+
+        /*connection.on("UpdatePlayerList", function (players) {
+            const playerList = document.getElementById('playerList');
+            playerList.innerHTML = '';
+            players.forEach(player => {
+                let li = document.createElement('li');
+                li.textContent = `${playerName.value} - ${player.Score} points`;
+                playerList.appendChild(li);
+            });
+        });*/
+    </script>
+</body>
+</html>
